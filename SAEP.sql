@@ -1,7 +1,4 @@
 
-
-create extension if not exists pgcrypto;
-
 create table funcionarios (
     id serial primary key,
     nome varchar(100) not null,
@@ -24,7 +21,7 @@ create table atividades (
     descricao text,
     prazo_entrega date not null,
     status varchar(20) not null default 'PENDENTE' check (status in ('PENDENTE', 'EM ANDAMENTO', 'CONCLUIDO', 'CANCELADO')),
-    data_criacao timestamp
+    data_criacao timestamp not null default current_timestamp
 );
 
 create table registros_atividades (
@@ -35,7 +32,7 @@ create table registros_atividades (
     data_registro timestamp not null default current_timestamp
 );
 
-create or replace function fn_conferir_e_anotar_atividade()
+create or replace function fn_conferir_atividade()
 returns trigger as $$
 declare
     v_ativo boolean;
@@ -52,6 +49,18 @@ begin
         new.data_criacao := current_timestamp;
     end if;
 
+    return new;
+end;
+$$ language plpgsql;
+
+create trigger trg_conferir_atividade
+before insert on atividades
+for each row
+execute function fn_conferir_atividade();
+
+create or replace function fn_anotar_atividade()
+returns trigger as $$
+begin
     insert into registros_atividades (atividade_id, acao, detalhes)
     values (
         new.id,
@@ -63,15 +72,15 @@ begin
 end;
 $$ language plpgsql;
 
-create trigger trg_conferir_atividade
+create trigger trg_anotar_atividade
 after insert on atividades
 for each row
-execute function fn_conferir_e_anotar_atividade();
+execute function fn_anotar_atividade();
 
 insert into funcionarios (nome, email, senha, ativo) values
-('Ana Silva', 'ana.silva@empresa.com', crypt('Senha123#', gen_salt('bf')), true),
-('Carlos Oliver', 'carlos.oliver@empresa.com', crypt('Senha456#', gen_salt('bf')), true),
-('Mariana Costa', 'mariana.costa@empresa.com', crypt('Senha789#', gen_salt('bf')), false);
+('Ana Silva', 'ana.silva@empresa.com', 'Senha123#', true),
+('Carlos Oliver', 'carlos.oliver@empresa.com', 'Senha456#', true),
+('Mariana Costa', 'mariana.costa@empresa.com', 'Senha789#', false);
 
 insert into tipos (nome) values
 ('Desenvolvimento'),
@@ -113,7 +122,7 @@ begin
         return;
     end if;
 
-    if v_funcionario.senha = crypt(p_senha, v_funcionario.senha) then
+    if v_funcionario.senha = p_senha then
         return query select true, 'Verificacao realizada com sucesso.'::text, v_funcionario.id, v_funcionario.nome;
     else
         return query select false, 'Senha incorreta.'::text, null::int, null::varchar;
@@ -162,5 +171,4 @@ select
 from atividades a
 join funcionarios f on a.funcionario_id = f.id
 order by a.prazo_entrega asc;
-
 
