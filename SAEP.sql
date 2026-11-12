@@ -1,162 +1,166 @@
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-CREATE TABLE colaboradores (
-    id SERIAL PRIMARY KEY,
-    nome VARCHAR(100) NOT NULL,
-    email VARCHAR(100) NOT NULL UNIQUE,
-    senha TEXT NOT NULL,
-    ativo BOOLEAN NOT NULL DEFAULT TRUE,
-    data_cadastro TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+
+create extension if not exists pgcrypto;
+
+create table funcionarios (
+    id serial primary key,
+    nome varchar(100) not null,
+    email varchar(100) not null unique,
+    senha text not null,
+    ativo boolean not null default true,
+    data_cadastro timestamp not null default current_timestamp
 );
 
-CREATE TABLE categorias (
-    id SERIAL PRIMARY KEY,
-    nome VARCHAR(50) NOT NULL UNIQUE
+create table tipos (
+    id serial primary key,
+    nome varchar(50) not null unique
 );
 
-CREATE TABLE tarefas (
-    id SERIAL PRIMARY KEY,
-    colaborador_id INT NOT NULL REFERENCES colaboradores(id) ON DELETE CASCADE,
-    categoria_id INT NOT NULL REFERENCES categorias(id) ON DELETE CASCADE,
-    titulo VARCHAR(150) NOT NULL,
-    descricao TEXT,
-    prazo_entrega DATE NOT NULL,
-    status VARCHAR(20) NOT NULL DEFAULT 'PENDENTE' CHECK (status IN ('PENDENTE', 'EM ANDAMENTO', 'CONCLUIDO', 'CANCELADO')),
-    data_criacao TIMESTAMP
+create table atividades (
+    id serial primary key,
+    funcionario_id int not null references funcionarios(id) on delete cascade,
+    tipo_id int not null references tipos(id) on delete cascade,
+    titulo varchar(150) not null,
+    descricao text,
+    prazo_entrega date not null,
+    status varchar(20) not null default 'PENDENTE' check (status in ('PENDENTE', 'EM ANDAMENTO', 'CONCLUIDO', 'CANCELADO')),
+    data_criacao timestamp
 );
 
-CREATE TABLE historico_tarefas (
-    id SERIAL PRIMARY KEY,
-    tarefa_id INT REFERENCES tarefas(id) ON DELETE CASCADE,
-    acao VARCHAR(100) NOT NULL,
-    detalhes TEXT,
-    data_historico TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+create table registros_atividades (
+    id serial primary key,
+    atividade_id int references atividades(id) on delete cascade,
+    acao varchar(100) not null,
+    detalhes text,
+    data_registro timestamp not null default current_timestamp
 );
 
-CREATE OR REPLACE FUNCTION fn_validar_e_registrar_tarefa()
-RETURNS TRIGGER AS $$
-DECLARE
-    v_ativo BOOLEAN;
-BEGIN
-    SELECT ativo INTO v_ativo
-    FROM colaboradores
-    WHERE id = NEW.colaborador_id;
+create or replace function fn_conferir_e_anotar_atividade()
+returns trigger as $$
+declare
+    v_ativo boolean;
+begin
+    select ativo into v_ativo
+    from funcionarios
+    where id = new.funcionario_id;
 
-    IF v_ativo IS NOT TRUE THEN
-        RAISE EXCEPTION 'Erro: O colaborador (ID %) não está ativo ou não existe no sistema.', NEW.colaborador_id;
-    END IF;
+    if v_ativo is not true then
+        raise exception 'Erro: O funcionario (ID %) nao esta ativo ou nao existe no sistema.', new.funcionario_id;
+    end if;
 
-    IF NEW.data_criacao IS NULL THEN
-        NEW.data_criacao := CURRENT_TIMESTAMP;
-    END IF;
+    if new.data_criacao is null then
+        new.data_criacao := current_timestamp;
+    end if;
 
-    IF NEW.id IS NULL THEN
-        NEW.id := nextval(pg_get_serial_sequence('tarefas', 'id'));
-    END IF;
+    insert into registros_atividades (atividade_id, acao, detalhes)
+    values (
+        new.id,
+        'CRIACAO DE ATIVIDADE',
+        concat('Atividade "', new.titulo, '" criada e vinculada ao funcionario ID ', new.funcionario_id)
+    );
 
-    INSERT INTO historico_tarefas (tarefa_id, acao, detalhes)
-    VALUES (NEW.id, 'CRIAÇÃO DE TAREFA', CONCAT('Tarefa "', NEW.titulo, '" criada e vinculada ao colaborador ID ', NEW.colaborador_id));
+    return new;
+end;
+$$ language plpgsql;
 
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+create trigger trg_conferir_atividade
+after insert on atividades
+for each row
+execute function fn_conferir_e_anotar_atividade();
 
-CREATE TRIGGER trg_validar_tarefa
-BEFORE INSERT ON tarefas
-FOR EACH ROW
-EXECUTE FUNCTION fn_validar_e_registrar_tarefa();
+insert into funcionarios (nome, email, senha, ativo) values
+('Ana Silva', 'ana.silva@empresa.com', crypt('Senha123#', gen_salt('bf')), true),
+('Carlos Oliver', 'carlos.oliver@empresa.com', crypt('Senha456#', gen_salt('bf')), true),
+('Mariana Costa', 'mariana.costa@empresa.com', crypt('Senha789#', gen_salt('bf')), false);
 
-INSERT INTO colaboradores (nome, email, senha, ativo) VALUES
-('Ana Silva', 'ana.silva@empresa.com', crypt('Senha123#', gen_salt('bf')), TRUE),
-('Carlos Oliver', 'carlos.oliver@empresa.com', crypt('Senha456#', gen_salt('bf')), TRUE),
-('Mariana Costa', 'mariana.costa@empresa.com', crypt('Senha789#', gen_salt('bf')), FALSE);
-
-INSERT INTO categorias (nome) VALUES
+insert into tipos (nome) values
 ('Desenvolvimento'),
 ('Infraestrutura'),
 ('Design & UX');
 
-INSERT INTO tarefas (colaborador_id, categoria_id, titulo, descricao, prazo_entrega, status) VALUES
-(1, 1, 'Criar API REST de Autenticação', 'Desenvolver endpoints de login seguro com JWT', CURRENT_DATE + INTERVAL '2 days', 'EM ANDAMENTO'),
-(2, 2, 'Migração de Servidor PostgreSQL', 'Atualizar versão do banco de dados em produção', CURRENT_DATE + INTERVAL '1 day', 'PENDENTE'),
-(1, 3, 'Redesign da Landing Page', 'Ajustar layout para responsividade móvel', CURRENT_DATE + INTERVAL '5 days', 'PENDENTE');
+insert into atividades (funcionario_id, tipo_id, titulo, descricao, prazo_entrega, status) values
+(1, 1, 'Criar API REST de Autenticacao', 'Desenvolver endpoints de login seguro com JWT', current_date + interval '2 days', 'EM ANDAMENTO'),
+(2, 2, 'Migracao de Servidor PostgreSQL', 'Atualizar versao do banco de dados em producao', current_date + interval '1 day', 'PENDENTE'),
+(1, 3, 'Redesign da Landing Page', 'Ajustar layout para responsividade movel', current_date + interval '5 days', 'PENDENTE');
 
-INSERT INTO historico_tarefas (tarefa_id, acao, detalhes) VALUES
-(1, 'ATUALIZAÇÃO DE STATUS', 'Status alterado de PENDENTE para EM ANDAMENTO por Ana Silva');
+insert into registros_atividades (atividade_id, acao, detalhes) values
+(1, 'ATUALIZACAO DE STATUS', 'Status alterado de PENDENTE para EM ANDAMENTO por Ana Silva');
 
-CREATE OR REPLACE FUNCTION fn_autenticar_usuario(
-    p_email VARCHAR,
-    p_senha VARCHAR
+create or replace function fn_verificar_acesso(
+    p_email varchar,
+    p_senha varchar
 )
-RETURNS TABLE (
-    autenticado BOOLEAN,
-    mensagem TEXT,
-    colaborador_id INT,
-    colaborador_nome VARCHAR
-) AS $$
-DECLARE
-    v_colaborador colaboradores%ROWTYPE;
-BEGIN
-    SELECT * INTO v_colaborador
-    FROM colaboradores
-    WHERE email = p_email;
+returns table (
+    autenticado boolean,
+    mensagem text,
+    funcionario_id int,
+    funcionario_nome varchar
+) as $$
+declare
+    v_funcionario funcionarios%rowtype;
+begin
+    select * into v_funcionario
+    from funcionarios
+    where email = p_email;
 
-    IF NOT FOUND THEN
-        RETURN QUERY SELECT FALSE, 'E-mail incorreto ou não cadastrado.'::TEXT, NULL::INT, NULL::VARCHAR;
-        RETURN;
-    END IF;
+    if not found then
+        return query select false, 'E-mail incorreto ou nao cadastrado.'::text, null::int, null::varchar;
+        return;
+    end if;
 
-    IF v_colaborador.ativo IS FALSE THEN
-        RETURN QUERY SELECT FALSE, 'Acesso negado: colaborador inativo.'::TEXT, NULL::INT, NULL::VARCHAR;
-        RETURN;
-    END IF;
+    if v_funcionario.ativo is false then
+        return query select false, 'Acesso negado: funcionario inativo.'::text, null::int, null::varchar;
+        return;
+    end if;
 
-    IF v_colaborador.senha = crypt(p_senha, v_colaborador.senha) THEN
-        RETURN QUERY SELECT TRUE, 'Autenticação realizada com sucesso.'::TEXT, v_colaborador.id, v_colaborador.nome;
-    ELSE
-        RETURN QUERY SELECT FALSE, 'Senha incorreta.'::TEXT, NULL::INT, NULL::VARCHAR;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
+    if v_funcionario.senha = crypt(p_senha, v_funcionario.senha) then
+        return query select true, 'Verificacao realizada com sucesso.'::text, v_funcionario.id, v_funcionario.nome;
+    else
+        return query select false, 'Senha incorreta.'::text, null::int, null::varchar;
+    end if;
+end;
+$$ language plpgsql;
 
-CREATE OR REPLACE VIEW vw_painel_principal AS
-SELECT 
-    c.nome AS colaborador_nome,
-    t.titulo AS titulo_tarefa,
-    cat.nome AS categoria,
-    t.prazo_entrega,
-    t.status AS status_atividade
-FROM tarefas t
-JOIN colaboradores c ON t.colaborador_id = c.id
-JOIN categorias cat ON t.categoria_id = cat.id;
+create or replace view vw_resumo_geral as
+select
+    f.nome as funcionario_nome,
+    a.titulo as titulo_atividade,
+    tp.nome as tipo,
+    a.prazo_entrega,
+    a.status as status_atividade
+from atividades a
+join funcionarios f on a.funcionario_id = f.id
+join tipos tp on a.tipo_id = tp.id;
 
-CREATE OR REPLACE FUNCTION fn_buscar_colaboradores(p_termo TEXT)
-RETURNS TABLE (
-    id INT,
-    nome VARCHAR,
-    email VARCHAR,
-    ativo BOOLEAN
-) AS $$
-BEGIN
-    RETURN QUERY
-    SELECT 
-        c.id,
-        c.nome,
-        c.email,
-        c.ativo
-    FROM colaboradores c
-    WHERE c.nome ILIKE '%' || p_termo || '%'
-       OR c.email ILIKE '%' || p_termo || '%';
-END;
-$$ LANGUAGE plpgsql;
+create or replace function fn_localizar_funcionarios(p_termo text)
+returns table (
+    id int,
+    nome varchar,
+    email varchar,
+    ativo boolean
+) as $$
+begin
+    return query
+    select
+        f.id,
+        f.nome,
+        f.email,
+        f.ativo
+    from funcionarios f
+    where f.nome ilike '%' || p_termo || '%'
+       or f.email ilike '%' || p_termo || '%';
+end;
+$$ language plpgsql;
 
-CREATE OR REPLACE VIEW vw_cronograma_prazos AS
-SELECT 
-    t.titulo AS titulo_tarefa,
-    t.status AS status_tarefa,
-    (t.prazo_entrega - CURRENT_DATE) AS dias_restantes,
-    c.nome AS responsavel,
-    t.prazo_entrega
-FROM tarefas t
-JOIN colaboradores c ON t.colaborador_id = c.id
-ORDER BY t.prazo_entrega ASC;
+create or replace view vw_agenda_prazos as
+select
+    a.titulo as titulo_atividade,
+    a.status as status_atividade,
+    (a.prazo_entrega - current_date) as dias_restantes,
+    f.nome as responsavel,
+    a.prazo_entrega
+from atividades a
+join funcionarios f on a.funcionario_id = f.id
+order by a.prazo_entrega asc;
+
+
